@@ -7,178 +7,101 @@ module Ruql
 
     def initialize(quiz,options={})
       @gem_root = Gem.loaded_specs['ruql-olx'].full_gem_path rescue '.'
-      @show_solutions = options.delete('--solutions')
-      @show_tags = options.delete('--olx-tags') || options.delete('--show-tags')
-      @template = options.delete('--olx-template') ||
-        File.join(@gem_root, 'templates/simple.olx.erb')
       @output = ''
       @quiz = quiz
+      @raw = nil # temp var reset for each question
       @h = Builder::XmlMarkup.new(:target => @output, :indent => 2)
     end
 
     def self.allowed_options
-      opts = [
-        ['--olx-tags', GetoptLong::NO_ARGUMENT],
-        ['--olx-template', GetoptLong::REQUIRED_ARGUMENT]
-      ]
-      help = <<eos
-The OLX renderer uses  supports these options:
-  --olx-tags
-      Show question's tags in OLX output, within an element <div class="tags">.
-  --olx-template=file.olx.erb
-      Use file.olx.erb as OLX template, which has <%= yield %> where questions should go.
-      Default is #{@gem_root}/templates/simple.olx.erb
-      You can use the local variables in the .erb template:
-        <%= quiz.title %> - the quiz title
-        <%= quiz.num_questions %> - total number of questions
-        <%= quiz.points %> - total number of points for whole quiz
-  NOTE: If there is more than one quiz (collection of questions) in the file,
-      a complete <olx>...</olx> block is produced in the output for EACH quiz.
-eos
+      opts = []
+      help = ''
       return [help, opts]
     end
 
     def render_quiz
-      render_with_template do
-        render_questions
-        @output
-      end
-      self
+      render_questions
+      @output
     end
 
-    def render_with_template
-      # local variables that should be in scope in the template 
-      quiz = @quiz
-      # the ERB template includes 'yield' where questions should go:
-      output = ERB.new(IO.read(File.expand_path @template)).result(binding)
-      @output = output
-    end
-    
     # this is what's called when the OLX template yields:
     def render_questions
-      render_random_seed
-      @h.ol :class => 'questions' do
-        @quiz.questions.each_with_index do |q,i|
-          case q
-          when MultipleChoice, SelectMultiple, TrueFalse then render_multiple_choice(q,i)
-          when FillIn then render_fill_in(q, i)
-          else
-            raise Ruql::QuizContentError.new "Unknown question type: #{q}"
+      @quiz.questions.each do |q|
+        case q
+        when MultipleChoice then render_multiple_choice(q)
+        when SelectMultiple then render_select_multiple(q)
+        else
+          raise Ruql::QuizContentError.new "Unknown question type: #{q}"
+        end
+      end
+    end
+
+    # //This Question has Html formatting in the answer
+    # <problem display_name="Multiple Choice" markdown="null">
+    #   <multiplechoiceresponse>
+    #     <label>Which condition is necessary when using Ruby's collection methods such as map and reject?</label>
+    #     <description> </description>
+    #     <choicegroup type="MultipleChoice">
+    #       <choice correct="false">The collection on which they operate must consist of objects of the same type.</choice>
+    #       <choice correct="true">The collection must respond to <pre> &lt;tt&gt;each&lt;/tt&gt; </pre></choice>
+    #       <choice correct="false">Every element of the collection must respond to <pre> &lt;tt&gt;each&lt;/tt&gt; </pre></choice>
+    #       <choice correct="false">The collection itself must be one of Ruby's built-in collection types, such as <pre> &lt;tt&gt;Array&lt;/tt&gt; or &lt;tt&gt;Set&lt;/tt&gt; </pre></choice>
+    #     </choicegroup>
+    #   </multiplechoiceresponse>
+    # </problem>
+    def render_multiple_choice(q)
+      @h.problem(display_name: 'MultipleChoice', markdown: 'null') do
+        @h.multiplechoiceresponse do
+          render_question_text(q)
+          @h.choicegroup(type: 'MultipleChoice') do
+            render_question_text(q)
+            render_answers(q)
+          end
+        end
+      end
+      @output << "\n\n"
+    end
+
+    def render_select_multiple(q)
+      @h.problem(display_name: 'Checkboxes', markdown: 'null') do
+        @h.choiceresponse do
+          render_question_text(q)
+          @h.checkboxgroup do
+            render_answers(q)
           end
         end
       end
     end
 
-
-    def render_multiple_choice(q,index)
-      render_question_text(q, index) do
-        answers =
-          if q.class == TrueFalse then q.answers.sort.reverse # True always first
-          elsif q.randomize then q.answers.sort_by { rand }
-          else q.answers
-          end
-        @h.ol :class => 'answers' do
-          answers.each do |answer|
-            if @show_solutions
-              render_answer_for_solutions(answer, q.raw?, q.class == TrueFalse)
-            else
-              if q.raw? then @h.li { |l| l << answer.answer_text } else @h.li answer.answer_text end
-            end
-          end
-        end
-      end
-      self
-    end
-
-    def render_fill_in(q, idx)
-      render_question_text(q, idx) do
-        if @show_solutions
-          answer = q.answers[0]
-          if answer.has_explanation?
-            if q.raw? then @h.p(:class => 'explanation') { |p| p << answer.explanation }
-            else @h.p(answer.explanation, :class => 'explanation') end
-          end
-          answers = (answer.answer_text.kind_of?(Array) ? answer.answer_text : [answer.answer_text])
-          @h.ol :class => 'answers' do
-            answers.each do |answer|
-              if answer.kind_of?(Regexp)
-                answer = answer.inspect
-                if !q.case_sensitive
-                  answer += 'i'
-                end
-              end
-              @h.li do
-                if q.raw? then @h.p { |p| p << answer } else @h.p answer end
-              end
-            end
-          end
+    def render_answers(q)
+      q.answers.each do |answer|
+        if q.raw?
+          @h.choice(correct: answer.correct?)  { |l| l << answer.answer_text }
+        else
+          @h.choice(answer.answer_text, correct: answer.correct?)
         end
       end
     end
 
-    def render_answer_for_solutions(answer,raw,is_true_false = nil)
-      args = {:class => (answer.correct? ? 'correct' : 'incorrect')}
-      if is_true_false 
-        answer.answer_text.prepend(
-          answer.correct? ? "CORRECT: " : "INCORRECT: ")
-      end
-      @h.li(args) do
-        if raw then @h.p { |p| p << answer.answer_text } else @h.p answer.answer_text  end
-        if answer.has_explanation?
-          if raw then @h.p(:class => 'explanation') { |p| p << answer.explanation }
-          else @h.p(answer.explanation, :class => 'explanation') end
-        end
-      end
-    end
-
-    def render_question_text(question,index)
-      html_args = {
-        :id => "question-#{index}",
-        :class => ['question', question.class.to_s.downcase, (question.multiple ? 'multiple' : '')]
-          .join(' ')
-      }
-      @h.li html_args  do
-        @h.div :class => 'text' do
-          qtext = "[#{question.points} point#{'s' if question.points>1}] " <<
-            ('Select ALL that apply: ' if question.multiple).to_s <<
-            if question.class == FillIn then question.question_text.gsub(/\-+/, '_____________________________')
-            else question.question_text
-            end
-          if @show_tags
-            @h.div(:class => 'text') do
-              question.tags.join(',')
-            end
-          end
-          if question.raw?
-            @h.p { |p| p << qtext }
-          else
-            qtext.each_line do |p|
-              @h.p do |par|
-                par << p # preserves HTML markup
-              end
+    def render_question_text(q)
+      qtext = q.question_text
+      qtext << " Select ALL that apply." if q.multiple
+      if q.raw?
+        @h.label do
+          qtext.each_line do |p|
+            @h.p do |par|
+              par << p # preserves HTML markup
             end
           end
         end
-        yield # render answers
+      else
+        @h.label qtext
       end
-      self
     end
 
     def quiz_header
-      @h.div(:id => 'student-name') do
-        @h.p 'Name:'
-        @h.p 'Student ID:'
-      end
-      if @quiz.options[:instructions]
-        @h.div :id => 'instructions' do
-          @quiz.options[:instructions].each_line { |p| @h.p p }
-        end
-      end
       self
     end
 
-    def render_random_seed
-      @h.comment! "Seed: #{@quiz.seed}"
-    end
   end
 end
