@@ -6,22 +6,54 @@ module Ruql
     attr_reader :output
 
     def initialize(quiz,options={})
-      @gem_root = Gem.loaded_specs['ruql-olx'].full_gem_path rescue '.'
+      @sequential = options.delete('--sequential')
       @output = ''
       @quiz = quiz
-      @raw = nil # temp var reset for each question
       @h = Builder::XmlMarkup.new(:target => @output, :indent => 2)
     end
 
     def self.allowed_options
-      opts = []
-      help = ''
+      opts = [
+        ['--sequential', GetoptLong::REQUIRED_ARGUMENT] 
+      ]
+      help = <<eos
+The OLX renderer supports these options:
+  --sequential <filename>.xml
+      Write the OLX quiz header (includes quiz name, time limit, etc to <filename>.xml.
+      This information can be copy-pasted into the appropriate <sequential> OLX element
+      in a course export.  If omitted, no quiz header .xml file is created.
+eos
       return [help, opts]
     end
 
     def render_quiz
       render_questions
+      write_quiz_header if @sequential
       @output
+    end
+
+    # write the quiz header
+    def write_quiz_header
+      fh = File.open(@sequential, 'w')
+      @quiz_header = Builder::XmlMarkup.new(:target => fh, :indent => 2)
+      @quiz_header.sequential(
+        is_time_limited: "true",
+        default_time_limit_minutes: self.time_limit,
+        display_name: @quiz.title,
+        exam_review_rules: "",
+        is_onboarding_exam: "false",
+        is_practice_exam: "false",
+        is_proctored_enabled: "false")
+      fh.close
+    end
+
+    def time_limit
+      minutes_per_point = 1
+      slop = 5 # extra time for setup, etc
+      limit =  @quiz.points.to_i * minutes_per_point + slop
+      # round up to next 5 minutes
+      limit += 5 - (limit % 5)
+      limit
     end
 
     # this is what's called when the OLX template yields:
@@ -54,7 +86,6 @@ module Ruql
         @h.multiplechoiceresponse do
           render_question_text(q)
           @h.choicegroup(type: 'MultipleChoice') do
-            render_question_text(q)
             render_answers(q)
           end
         end
@@ -75,28 +106,14 @@ module Ruql
 
     def render_answers(q)
       q.answers.each do |answer|
-        if q.raw?
-          @h.choice(correct: answer.correct?)  { |l| l << answer.answer_text }
-        else
-          @h.choice(answer.answer_text, correct: answer.correct?)
-        end
+        @h.choice(correct: answer.correct?)  { |l| l << answer.answer_text }
       end
     end
 
     def render_question_text(q)
       qtext = q.question_text
       qtext << " Select ALL that apply." if q.multiple
-      if q.raw?
-        @h.label do
-          qtext.each_line do |p|
-            @h.p do |par|
-              par << p # preserves HTML markup
-            end
-          end
-        end
-      else
-        @h.label qtext
-      end
+      @h.label { |l| l << qtext }
     end
 
     def quiz_header
