@@ -116,9 +116,5 @@ eos
       @h.label { |l| l << qtext }
     end
 
-    def quiz_header
-      self
-    end
-
   end
 end
