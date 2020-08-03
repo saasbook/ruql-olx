@@ -7,6 +7,7 @@ module Ruql
 
     def initialize(quiz,options={})
       @sequential = options.delete('--sequential')
+      @groupselect = (options.delete('--group-select') || 1_000_000).to_i
       @output = ''
       @quiz = quiz
       @h = Builder::XmlMarkup.new(:target => @output, :indent => 2)
@@ -14,19 +15,25 @@ module Ruql
 
     def self.allowed_options
       opts = [
-        ['--sequential', GetoptLong::REQUIRED_ARGUMENT] 
+        ['--sequential', GetoptLong::REQUIRED_ARGUMENT],
+        ['--group-select', GetoptLong::REQUIRED_ARGUMENT]
       ]
       help = <<eos
 The OLX renderer supports these options:
-  --sequential <filename>.xml
+  --sequential=<filename>.xml
       Write the OLX quiz header (includes quiz name, time limit, etc to <filename>.xml.
       This information can be copy-pasted into the appropriate <sequential> OLX element
       in a course export.  If omitted, no quiz header .xml file is created.
+  --group-select=<n>
+      If multiple RuQL questions share the same 'group' attribute, include at most n of them
+      in the output.  If omitted, defaults to "all questions in group".
 eos
       return [help, opts]
     end
 
     def render_quiz
+      @groups_seen = Hash.new { 0 }
+      @group_count = 0
       render_questions
       write_quiz_header if @sequential
       @output
@@ -59,6 +66,8 @@ eos
     # this is what's called when the OLX template yields:
     def render_questions
       @quiz.questions.each do |q|
+        # have we maxed out the number of questions per group for this group?
+        next unless more_in_group?(q)
         case q
         when MultipleChoice then render_multiple_choice(q)
         when SelectMultiple then render_select_multiple(q)
@@ -66,6 +75,14 @@ eos
           raise Ruql::QuizContentError.new "Unknown question type: #{q}"
         end
       end
+    end
+
+    def more_in_group?(q)
+      group = q.question_group
+      # OK to proceed if q. has no group, OR if we haven't used @groupselect questions in group
+      return true if group.to_s == ''
+      @groups_seen[group] += 1
+      return (@groups_seen[group] <= @groupselect)
     end
 
     # //This Question has Html formatting in the answer

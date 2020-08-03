@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    ruql-olx (0.0.1)
+    ruql-olx (0.0.2)
       builder (~> 3.0)
       ruql (~> 1.0, >= 1.0.2)
 
