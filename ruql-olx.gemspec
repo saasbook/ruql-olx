@@ -6,8 +6,8 @@ require "ruql/olx/version"
 Gem::Specification.new do |spec|
   spec.name          = "ruql-olx"
   spec.version       = Ruql::Olx::VERSION
-  spec.summary     = "OLX 5 renderer for RuQL"
-  spec.description = "OLX 5 renderer for RuQL"
+  spec.summary     = "OLX renderer for RuQL"
+  spec.description = "OLX renderer for RuQL"
   spec.authors     = ["Armando Fox"]
   spec.email       = 'fox@berkeley.edu'
   spec.homepage    = 'https://github.com/saasbook/ruql-olx'
@@ -39,5 +39,6 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "bundler", "~> 1.17"
   spec.add_development_dependency "rake", "~> 10.0"
   spec.add_development_dependency "rspec", "~> 3.0"
+  spec.add_development_dependency "byebug"
 end
 

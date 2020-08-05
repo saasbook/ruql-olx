@@ -6,24 +6,50 @@ module Ruql
     attr_reader :output
 
     def initialize(quiz,options={})
-      @sequential = options.delete('--sequential')
+      @quiz = quiz
+      @dryrun = !! options.delete('--dry-run')
+      if (chapter = options.delete('--chapter'))
+        root = options.delete('--root') || Dir.getwd
+        @edx = Ruql::Olx::ExportedEdxCourse.new(quiz, chapter, root,
+          # quiz options for edX
+          {
+            is_time_limited: "true",
+            default_time_limit_minutes: self.time_limit,
+            display_name: quiz.title,
+            exam_review_rules: "",
+            is_onboarding_exam: "false",
+            is_practice_exam: "false",
+            is_proctored_enabled: "false"
+          },
+          dryrun: @dryrun)
+      end
       @groupselect = (options.delete('--group-select') || 1_000_000).to_i
       @output = ''
-      @quiz = quiz
-      @h = Builder::XmlMarkup.new(:target => @output, :indent => 2)
+      @h = nil                  # XML Builder object
     end
 
     def self.allowed_options
       opts = [
-        ['--sequential', GetoptLong::REQUIRED_ARGUMENT],
-        ['--group-select', GetoptLong::REQUIRED_ARGUMENT]
+        ['--chapter', GetoptLong::REQUIRED_ARGUMENT],
+        ['--root', GetoptLong::REQUIRED_ARGUMENT],
+        ['--group-select', GetoptLong::REQUIRED_ARGUMENT],
+        ['--dry-run', GetoptLong::NO_ARGUMENT]
       ]
       help = <<eos
-The OLX renderer supports these options:
-  --sequential=<filename>.xml
-      Write the OLX quiz header (includes quiz name, time limit, etc to <filename>.xml.
-      This information can be copy-pasted into the appropriate <sequential> OLX element
-      in a course export.  If omitted, no quiz header .xml file is created.
+The OLX renderer modifies an exported edX course tree in place to incorporate the quiz.
+It supports these options:
+  --chapter '<name>'
+      Insert the quiz as the last child (sequential) of the chapter whose display name
+      is <name>.  Use quotes as needed to protect spaces/special characters in chapter name.
+      If multiple chapter names match, the quiz will end up in one of them.
+      If this option is omitted, the problem XML will instead be written to standard output,
+      and no files will be created or modified.
+  --root=<path>
+      Specify <path> as root directory of the edX course export.  If omitted, default is '.'
+  --dry-run
+      Only valid with --chapter: report names of created files but then delete them from export.
+      The files are created and deleted, so not a true dry run, but leaves the export intact
+      while verifying that the changes are possible.
   --group-select=<n>
       If multiple RuQL questions share the same 'group' attribute, include at most n of them
       in the output.  If omitted, defaults to "all questions in group".
@@ -32,26 +58,15 @@ eos
     end
 
     def render_quiz
+      # caller expects to find "quiz content" in @output, but if we modified edX, then
+      # output is just the report of what we did.
       @groups_seen = Hash.new { 0 }
       @group_count = 0
       render_questions
-      write_quiz_header if @sequential
-      @output
-    end
-
-    # write the quiz header
-    def write_quiz_header
-      fh = File.open(@sequential, 'w')
-      @quiz_header = Builder::XmlMarkup.new(:target => fh, :indent => 2)
-      @quiz_header.sequential(
-        is_time_limited: "true",
-        default_time_limit_minutes: self.time_limit,
-        display_name: @quiz.title,
-        exam_review_rules: "",
-        is_onboarding_exam: "false",
-        is_practice_exam: "false",
-        is_proctored_enabled: "false")
-      fh.close
+      if @edx
+        @edx.add_quiz
+        @output = @edx.report
+      end
     end
 
     def time_limit
@@ -66,6 +81,8 @@ eos
     # this is what's called when the OLX template yields:
     def render_questions
       @quiz.questions.each do |q|
+        question_xml = ''
+        @h = Builder::XmlMarkup.new(:target => question_xml, :indent => 2)
         # have we maxed out the number of questions per group for this group?
         next unless more_in_group?(q)
         case q
@@ -73,6 +90,12 @@ eos
         when SelectMultiple then render_select_multiple(q)
         else
           raise Ruql::QuizContentError.new "Unknown question type: #{q}"
+        end
+        # question_xml now contains the XML of the given question...
+        if @edx
+          @edx.add_problem(question_xml)
+        else
+          @output << question_xml << "\n"
         end
       end
     end
@@ -85,19 +108,6 @@ eos
       return (@groups_seen[group] <= @groupselect)
     end
 
-    # //This Question has Html formatting in the answer
-    # <problem display_name="Multiple Choice" markdown="null">
-    #   <multiplechoiceresponse>
-    #     <label>Which condition is necessary when using Ruby's collection methods such as map and reject?</label>
-    #     <description> </description>
-    #     <choicegroup type="MultipleChoice">
-    #       <choice correct="false">The collection on which they operate must consist of objects of the same type.</choice>
-    #       <choice correct="true">The collection must respond to <pre> &lt;tt&gt;each&lt;/tt&gt; </pre></choice>
-    #       <choice correct="false">Every element of the collection must respond to <pre> &lt;tt&gt;each&lt;/tt&gt; </pre></choice>
-    #       <choice correct="false">The collection itself must be one of Ruby's built-in collection types, such as <pre> &lt;tt&gt;Array&lt;/tt&gt; or &lt;tt&gt;Set&lt;/tt&gt; </pre></choice>
-    #     </choicegroup>
-    #   </multiplechoiceresponse>
-    # </problem>
     def render_multiple_choice(q)
       @h.problem(display_name: 'MultipleChoice', markdown: 'null') do
         @h.multiplechoiceresponse do
@@ -107,7 +117,6 @@ eos
           end
         end
       end
-      @output << "\n\n"
     end
 
     def render_select_multiple(q)

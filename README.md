@@ -6,9 +6,10 @@ developed and used by [edX](https://edx.org) for rendering course assets.
 
 ## Installation
 
-Add this line to your application's Gemfile:
+Add to your application's Gemfile:
 
 ```ruby
+gem 'ruql'
 gem 'ruql-olx'
 ```
 
@@ -21,6 +22,23 @@ Or install it yourself as:
     $ gem install ruql-olx
 
 ## Usage
+
+The simplest usage is to change to the root directory of the course
+export (the directory containing subdirectories `chapters`, `course`,
+etc.) and say  `ruql olx --chapter 'Chapter Display Name' quizfile.rb`
+
+
+- for each problem, create drafts/problem/<uuid>.xml containng <problem>...</problem>
+- create a sequential using existing logic; let its uid be UU.xml
+- for each quiz, create drafts/vertical/<uuid>.xml containing:
+<vertical display_name="Quiz name" index_in_children_list="0" parent_url="i4x://BerkeleyX/CSTest101/sequential/UU">
+  <problem url_name="5d7a8b06b3b5440aa9c1f6059f2e0945"/>
+  <problem url_name="2ffcfc7a92894770896bd15e311ef77e"/>
+</vertical>
+
+- search for chapters/ .xml file having <chapter display_name="Chapter
+Display Name"
+- in that file, add <sequential url_name="UU"/> as the last child of <chapter>
 
 The simplest usage is `ruql olx --sequential seq.xml quizfile.rb > output.olx`.
 
