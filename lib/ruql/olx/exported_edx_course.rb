@@ -17,7 +17,6 @@ module Ruql
         @course_name = find_course_name
         @created_files = []       # to delete in case of error, or list created
         @modified_files = []
-        @quiz_filehandle = nil
         @problem_ids = []
         @sequential_id = uuid()
         @vertical_id = uuid()
@@ -38,7 +37,6 @@ module Ruql
       end
       
       def add_quiz
-        quiz_vertical = uuid()
         begin
           create_sequential
           create_vertical
