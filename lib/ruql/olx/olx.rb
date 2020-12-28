@@ -23,6 +23,7 @@ module Ruql
           },
           dryrun: @dryrun)
       end
+      @question_number = 1
       @groupselect = (options.delete('--group-select') || 1_000_000).to_i
       @output = ''
       @h = nil                  # XML Builder object
@@ -97,6 +98,7 @@ eos
         else
           @output << question_xml << "\n"
         end
+        @question_number += 1
       end
     end
 
@@ -109,7 +111,7 @@ eos
     end
 
     def render_multiple_choice(q)
-      @h.problem(display_name: 'MultipleChoice', markdown: 'null') do
+      @h.problem(display_name: "Question #{@question_number}", markdown: 'null') do
         @h.multiplechoiceresponse do
           render_question_text(q)
           @h.choicegroup(type: 'MultipleChoice') do
@@ -120,7 +122,7 @@ eos
     end
 
     def render_select_multiple(q)
-      @h.problem(display_name: 'Checkboxes', markdown: 'null') do
+      @h.problem(display_name: "Question #{@question_number}", markdown: 'null') do
         @h.choiceresponse do
           render_question_text(q)
           @h.checkboxgroup do
